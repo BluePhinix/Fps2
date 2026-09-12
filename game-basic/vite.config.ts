@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
+  // Relative asset paths so the built game works from a GitHub Pages
+  // subdirectory (https://<user>.github.io/<repo>/) as well as from a root domain.
+  base: './',
   plugins: [react()],
   resolve: {
     alias: {
