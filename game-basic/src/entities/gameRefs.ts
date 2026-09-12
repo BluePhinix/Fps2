@@ -12,6 +12,15 @@ export const playerPosition = new THREE.Vector3(0, 1.6, 0)
 // Whether the pointer is locked (FPS look active)
 export const pointerLocked = { current: false }
 
+// True when running on a touch device. Pointer lock does not exist on mobile,
+// so anything gated behind "is the player aiming" must accept this instead.
+export const isTouchMode = { current: false }
+
+/** Player is allowed to shoot / aim (pointer locked on desktop, always on touch). */
+export function isAimActive(): boolean {
+  return pointerLocked.current || isTouchMode.current
+}
+
 // Registry of enemy root meshes for hitscan raycasting.
 // Key: enemyId, Value: the enemy's root Object3D (with userData.enemyId set)
 export const enemyMeshRegistry = new Map<string, THREE.Object3D>()

@@ -2,3 +2,4 @@
 export * from './Engine'
 export * from './Input'
 export * from './World'
+export * from './quality'

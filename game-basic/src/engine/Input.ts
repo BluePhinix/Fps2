@@ -52,6 +52,7 @@ interface InputStore extends InputState {
   // 输入查询
   getMovementInput: () => { x: number; y: number }
   isActionPressed: (action: keyof KeyBindings) => boolean
+  isFiring: () => boolean
   
   // 重置
   resetInput: () => void
@@ -61,6 +62,53 @@ interface InputStore extends InputState {
   
   // 相机角度
   setCameraYaw: (yaw: number) => void
+}
+
+// ============ 触屏输入 / Touch input ============
+//
+// Touch state lives OUTSIDE the zustand store on purpose: it changes many times
+// per frame (joystick + look drag) and pushing it through `set()` would trigger
+// a React render on every single pointer move.
+
+export const touchInput = {
+  /** Analogue movement, -1..1 on each axis. */
+  moveX: 0,
+  moveY: 0,
+  /** Look delta accumulated since the last frame consumed it. */
+  lookX: 0,
+  lookY: 0,
+  fire: false,
+  jump: false,
+  sprint: false,
+  /** One-shot, cleared by the consumer. */
+  reloadRequested: false,
+}
+
+/** Read and clear the accumulated look delta. */
+export function consumeTouchLook(): { x: number; y: number } {
+  const x = touchInput.lookX
+  const y = touchInput.lookY
+  touchInput.lookX = 0
+  touchInput.lookY = 0
+  return { x, y }
+}
+
+/** Read and clear the one-shot reload request. */
+export function consumeTouchReload(): boolean {
+  const r = touchInput.reloadRequested
+  touchInput.reloadRequested = false
+  return r
+}
+
+export function resetTouchInput(): void {
+  touchInput.moveX = 0
+  touchInput.moveY = 0
+  touchInput.lookX = 0
+  touchInput.lookY = 0
+  touchInput.fire = false
+  touchInput.jump = false
+  touchInput.sprint = false
+  touchInput.reloadRequested = false
 }
 
 // 默认键位
@@ -141,6 +189,12 @@ export const useInputStore = create<InputStore>((set, get) => ({
     if (state.isActionPressed('forward')) y += 1
     if (state.isActionPressed('backward')) y -= 1
 
+    // 触屏摇杆（模拟量）
+    if (touchInput.moveX !== 0 || touchInput.moveY !== 0) {
+      x += touchInput.moveX
+      y += touchInput.moveY
+    }
+
     // 手柄输入（如果连接）
     if (state.gamepadConnected && state.gamepadAxes.length >= 2) {
       const deadzone = 0.15
@@ -162,10 +216,17 @@ export const useInputStore = create<InputStore>((set, get) => ({
 
   // 检查动作是否按下
   isActionPressed: (action) => {
+    // Touch buttons mirror the jump/sprint actions.
+    if (action === 'jump' && touchInput.jump) return true
+    if (action === 'sprint' && touchInput.sprint) return true
+
     const state = get()
     const keys = state.bindings[action]
     return keys.some((key) => state.keys.has(key))
   },
+
+  // 是否正在开火（鼠标左键 或 触屏开火键）
+  isFiring: () => get().mouseButtons.has(0) || touchInput.fire,
 
   // 重置输入
   resetInput: () =>

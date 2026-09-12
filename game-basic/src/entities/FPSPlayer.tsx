@@ -4,8 +4,8 @@ import { RigidBody, CapsuleCollider, useRapier } from '@react-three/rapier'
 import type { RapierRigidBody } from '@react-three/rapier'
 import { Ray } from '@dimforge/rapier3d-compat'
 import * as THREE from 'three'
-import { useInputStore, useGameStore, GameState } from '@/engine'
-import { playerPosition, pointerLocked, onPlayerDamage } from './gameRefs'
+import { useInputStore, useGameStore, GameState, consumeTouchLook } from '@/engine'
+import { playerPosition, pointerLocked, isTouchMode, onPlayerDamage } from './gameRefs'
 import { useDamageEffect } from '@/effects'
 import { useGameSound } from '@/audio'
 
@@ -17,6 +17,12 @@ interface FPSPlayerProps {
 }
 
 const EYE_HEIGHT = 0.75 // camera offset above rigidbody center
+const TOUCH_LOOK_SCALE = 2.5 // finger drags are shorter than mouse sweeps
+
+// Ground-check ray, allocated once. Building a new `Ray` every frame was pure
+// garbage for the collector.
+const groundRay = new Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })
+const DOWN = { x: 0, y: -1, z: 0 }
 
 export const FPSPlayer = forwardRef<RapierRigidBody | null, FPSPlayerProps>(function FPSPlayer({
   position = [0, 2, 0],
@@ -93,16 +99,35 @@ export const FPSPlayer = forwardRef<RapierRigidBody | null, FPSPlayerProps>(func
     return () => window.removeEventListener('mousemove', handleMouseMove)
   }, [])
 
+  // Rotation order only needs setting once, not every frame.
+  useEffect(() => {
+    camera.rotation.order = 'YXZ'
+  }, [camera])
+
   useFrame((_state, delta) => {
     if (!rigidBodyRef.current) return
 
     const rb = rigidBodyRef.current
 
+    // 触屏视角：拖拽增量 / Touch look: consume the accumulated drag delta.
+    if (isTouchMode.current) {
+      const look = consumeTouchLook()
+      if (look.x !== 0 || look.y !== 0) {
+        // Touch drags cover far fewer pixels than a mouse sweep, so they get
+        // their own multiplier on top of the user's sensitivity setting.
+        const sens = useGameStore.getState().settings.mouseSensitivity * 0.0022 * TOUCH_LOOK_SCALE
+        const invertY = useGameStore.getState().settings.invertY
+        yaw.current -= look.x * sens
+        pitch.current -= look.y * sens * (invertY ? -1 : 1)
+        const maxPitch = Math.PI / 2 - 0.05
+        pitch.current = Math.max(-maxPitch, Math.min(maxPitch, pitch.current))
+      }
+    }
+
     // 即使非游戏状态也同步相机到刚体位置（保持视角）
     const pos = rb.translation()
     playerPosition.set(pos.x, pos.y + 0.4, pos.z)
     camera.position.set(pos.x, pos.y + EYE_HEIGHT, pos.z)
-    camera.rotation.order = 'YXZ'
     camera.rotation.y = yaw.current
     camera.rotation.x = pitch.current
 
@@ -141,9 +166,13 @@ export const FPSPlayer = forwardRef<RapierRigidBody | null, FPSPlayerProps>(func
     }
 
     // 地面检测
-    const rayOrigin = { x: pos.x, y: pos.y, z: pos.z }
-    const ray = new Ray(rayOrigin, { x: 0, y: -1, z: 0 })
-    const hit = rapierWorld.castRay(ray, 0.95, true, undefined, undefined, undefined, rb)
+    groundRay.origin.x = pos.x
+    groundRay.origin.y = pos.y
+    groundRay.origin.z = pos.z
+    groundRay.dir.x = DOWN.x
+    groundRay.dir.y = DOWN.y
+    groundRay.dir.z = DOWN.z
+    const hit = rapierWorld.castRay(groundRay, 0.95, true, undefined, undefined, undefined, rb)
 
     wasGrounded.current = isGrounded.current
     isGrounded.current = hit !== null

@@ -19,6 +19,23 @@ export default defineConfig({
       '@/utils': path.resolve(__dirname, './src/utils'),
     },
   },
+  build: {
+    // Modern-but-safe: anything that can run this scene supports ES2020, and
+    // it avoids shipping transpilation bloat to phones on slow connections.
+    target: 'es2020',
+    chunkSizeWarningLimit: 1800,
+    rollupOptions: {
+      output: {
+        // Three + Rapier are the bulk of the bundle. Splitting them means the
+        // browser can cache them across deploys and start rendering sooner.
+        manualChunks: {
+          three: ['three'],
+          react: ['react', 'react-dom'],
+          rapier: ['@dimforge/rapier3d-compat', '@react-three/rapier'],
+        },
+      },
+    },
+  },
   server: {
     headers: {
       'Cache-Control': 'no-cache, no-store, must-revalidate',

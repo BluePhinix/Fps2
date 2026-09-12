@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useGameStore, GameState } from '@/engine'
 import { useAudioStore, useGameSound } from '@/audio'
 import { usePointerLockUI } from '@/entities/pointerLockUI'
+import { useQualityStore, TIER_LABELS, type QualitySetting } from '@/engine/quality'
 import {
   Button,
   Switch,
@@ -62,7 +63,7 @@ function HealthBar({ current, max }: { current: number; max: number }) {
   const variant = isCritical ? 'danger' : isLow ? 'warning' : 'default'
 
   return (
-    <div className="w-52">
+    <div className="w-36 sm:w-52">
       <div className="flex justify-between items-center mb-1">
         <span className="text-label flex items-center gap-1">
           <Heart className="w-3 h-3 text-cyber-pink" /> HEALTH
@@ -158,8 +159,28 @@ function ScoreDisplay({ score }: { score: number }) {
 // FPS 计数器
 // ============================================
 function FPSCounter() {
-  const deltaTime = useGameStore((s) => s.deltaTime)
-  const fps = deltaTime > 0 ? Math.round(1 / deltaTime) : 0
+  const [fps, setFps] = useState(0)
+
+  // Measured locally with rAF. Reading it out of the game store meant a
+  // zustand write on every single frame just to update this number.
+  useEffect(() => {
+    let frames = 0
+    let last = performance.now()
+    let raf = 0
+    const tick = () => {
+      frames += 1
+      const now = performance.now()
+      if (now - last >= 500) {
+        setFps(Math.round((frames * 1000) / (now - last)))
+        frames = 0
+        last = now
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   return (
     <div className="px-3 py-1 bg-cyber-darker/80 border border-cyber-blue/30 text-xs font-cyber text-cyber-blue tabular-nums flex items-center gap-2">
       <Monitor className="w-3 h-3 text-cyber-pink" /> {fps} FPS
@@ -191,6 +212,41 @@ function CyberButton({ children, onClick, variant = 'primary', icon, className =
         <span className="relative z-10">{children}</span>
       </div>
     </MotionButton>
+  )
+}
+
+
+// ============================================
+// 画质选择 / Graphics quality
+// ============================================
+function QualityPicker() {
+  const preference = useQualityStore((s) => s.preference)
+  const setPreference = useQualityStore((s) => s.setPreference)
+  const detected = useQualityStore((s) => s.detected)
+  const options: QualitySetting[] = ['auto', 'low', 'medium', 'high']
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex gap-1">
+        {options.map((o) => (
+          <button
+            key={o}
+            onClick={() => setPreference(o)}
+            className={cn(
+              'px-2 py-1 text-[10px] font-cyber tracking-wider border transition-colors',
+              preference === o
+                ? 'border-cyber-pink text-cyber-pink bg-cyber-pink/10'
+                : 'border-cyber-blue/30 text-cyber-blue/60 hover:border-cyber-blue/60'
+            )}
+          >
+            {TIER_LABELS[o]}
+          </button>
+        ))}
+      </div>
+      {preference === 'auto' && detected && (
+        <span className="text-[9px] text-muted tracking-wider">detected: {TIER_LABELS[detected]}</span>
+      )}
+    </div>
   )
 }
 
@@ -237,6 +293,8 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
               <SettingItem label="Mute" icon={<Volume2 className="w-4 h-4" />}><Switch checked={muted} onCheckedChange={toggleMute} /></SettingItem>
               <Separator />
               <SettingItem label="Show FPS" icon={<Monitor className="w-4 h-4" />}><Switch checked={settings.showFPS} onCheckedChange={(c) => updateSettings({ showFPS: c })} /></SettingItem>
+              <Separator />
+              <SettingItem label="Graphics" icon={<Zap className="w-4 h-4" />}><QualityPicker /></SettingItem>
             </div>
           </DialogContent>
         )}
@@ -253,30 +311,34 @@ function HUD() {
   const stats = useGameStore((s) => s.stats)
   const settings = useGameStore((s) => s.settings)
   const isLocked = usePointerLockUI((s) => s.isLocked)
+  // Touch devices never get pointer lock, so "locked" is permanently false
+  // there — the crosshair and the click prompt both need to know that.
+  const isTouch = useQualityStore((s) => s.touch)
+  const aiming = isLocked || isTouch
 
   return (
     <TooltipProvider>
-      {/* 准星 — 仅在锁定时显示 */}
-      {isLocked && <Crosshair />}
+      {/* 准星 — 仅在锁定时（或触屏）显示 */}
+      {aiming && <Crosshair />}
 
-      <motion.div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-start" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
-        <div className="flex flex-col gap-3">
+      <motion.div className="absolute top-0 left-0 right-0 p-2 sm:p-4 flex justify-between items-start" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+        <div className="flex flex-col gap-2 sm:gap-3">
           <HealthBar current={combat.health} max={combat.maxHealth} />
           {settings.showFPS && <FPSCounter />}
         </div>
-        <div className="flex flex-col gap-3 items-end">
+        <div className="flex flex-col gap-2 sm:gap-3 items-end">
           <ScoreDisplay score={stats.score} />
           <KillTracker killed={combat.enemiesKilled} total={combat.enemiesTotal} />
         </div>
       </motion.div>
 
       {/* 底部弹药 */}
-      <motion.div className="absolute bottom-4 left-4" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}>
+      <motion.div className="absolute bottom-2 left-2 sm:bottom-4 sm:left-4" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}>
         <AmmoCounter ammo={combat.ammo} reserve={combat.reserveAmmo} reloading={combat.isReloading} />
       </motion.div>
 
-      {/* 点击锁定提示 */}
-      {!isLocked && <ClickToPlayPrompt />}
+      {/* 点击锁定提示 — 触屏设备没有指针锁定 */}
+      {!aiming && <ClickToPlayPrompt />}
     </TooltipProvider>
   )
 }
@@ -303,6 +365,7 @@ function MainMenu() {
   const startGame = useGameStore((s) => s.startGame)
   const [showSettings, setShowSettings] = useState(false)
   const { init, playGameplayBgm } = useGameSound()
+  const isTouch = useQualityStore((s) => s.touch)
 
   const handleStart = () => {
     init()
@@ -311,7 +374,7 @@ function MainMenu() {
   }
 
   return (
-    <motion.div className="absolute inset-0 flex flex-col items-center justify-center menu-bg scanline" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <motion.div className="absolute inset-0 flex flex-col items-center justify-center menu-bg scanline pointer-events-auto" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="absolute inset-0 opacity-20 grid-bg" />
       <motion.div className="relative text-center z-10" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
         <div className="relative mb-2">
@@ -335,13 +398,13 @@ function MainMenu() {
           <div className="menu-panel clip-corner-lg">
             <h3 className="menu-title"><Gamepad2 className="w-4 h-4" /> Controls</h3>
             <div className="space-y-3 text-sm font-cyber">
-              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Move</span><span className="menu-item-value">WASD</span></div>
-              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Look</span><span className="menu-item-value">MOUSE</span></div>
-              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Shoot</span><span className="menu-item-value">LEFT CLICK</span></div>
-              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Reload</span><span className="menu-item-value">R</span></div>
-              <div className="menu-item"><span className="menu-item-label"><MoveUp className="w-3 h-3" /> Jump</span><span className="menu-item-value">SPACE</span></div>
-              <div className="menu-item"><span className="menu-item-label"><Zap className="w-3 h-3" /> Sprint</span><span className="menu-item-value">SHIFT</span></div>
-              <div className="flex justify-between items-center"><span className="menu-item-label"><Pause className="w-3 h-3" /> Pause</span><span className="menu-item-value">ESC</span></div>
+              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Move</span><span className="menu-item-value">{isTouch ? 'LEFT STICK' : 'WASD'}</span></div>
+              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Look</span><span className="menu-item-value">{isTouch ? 'DRAG RIGHT' : 'MOUSE'}</span></div>
+              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Shoot</span><span className="menu-item-value">{isTouch ? 'FIRE BTN' : 'LEFT CLICK'}</span></div>
+              <div className="menu-item"><span className="menu-item-label"><ChevronRight className="w-3 h-3" /> Reload</span><span className="menu-item-value">{isTouch ? 'RELOAD BTN' : 'R'}</span></div>
+              <div className="menu-item"><span className="menu-item-label"><MoveUp className="w-3 h-3" /> Jump</span><span className="menu-item-value">{isTouch ? 'JUMP BTN' : 'SPACE'}</span></div>
+              <div className="menu-item"><span className="menu-item-label"><Zap className="w-3 h-3" /> Sprint</span><span className="menu-item-value">{isTouch ? 'SPRINT BTN' : 'SHIFT'}</span></div>
+              <div className="flex justify-between items-center"><span className="menu-item-label"><Pause className="w-3 h-3" /> Pause</span><span className="menu-item-value">{isTouch ? 'PAUSE BTN' : 'ESC'}</span></div>
             </div>
           </div>
         </motion.div>
@@ -364,7 +427,7 @@ function PauseMenu() {
   useEffect(() => { pauseBgm(); return () => resumeBgm() }, [pauseBgm, resumeBgm])
 
   return (
-    <motion.div className="absolute inset-0 flex flex-col items-center justify-center menu-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <motion.div className="absolute inset-0 flex flex-col items-center justify-center menu-bg pointer-events-auto" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <motion.div className="text-center" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
         <div className="flex items-center justify-center gap-3 mb-8">
           <Pause className="w-8 h-8 text-cyber-blue" />
@@ -396,7 +459,7 @@ function GameOverMenu() {
   useEffect(() => { stopBgm(); playFail() }, [stopBgm, playFail])
 
   return (
-    <motion.div className="absolute inset-0 flex flex-col items-center justify-center bg-cyber-darker/90 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <motion.div className="absolute inset-0 flex flex-col items-center justify-center bg-cyber-darker/90 backdrop-blur-md pointer-events-auto" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <motion.div className="text-center" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         <motion.div className="flex items-center justify-center gap-3 mb-6" initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={{ type: 'spring', damping: 10 }}>
           <Skull className="w-10 h-10 text-cyber-pink animate-pulse" />
@@ -432,7 +495,7 @@ function VictoryMenu() {
   useEffect(() => { stopBgm(); playSuccess() }, [stopBgm, playSuccess])
 
   return (
-    <motion.div className="absolute inset-0 flex flex-col items-center justify-center bg-cyber-darker/90 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <motion.div className="absolute inset-0 flex flex-col items-center justify-center bg-cyber-darker/90 backdrop-blur-md pointer-events-auto" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <motion.div className="text-center" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         <motion.div className="flex items-center justify-center gap-3 mb-6" initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={{ type: 'spring', damping: 10 }}>
           <Trophy className="w-10 h-10 text-cyber-yellow animate-pulse" />
@@ -462,16 +525,17 @@ function VictoryMenu() {
 export function GameUI() {
   const gameState = useGameStore((s) => s.gameState)
   return (
+    // The wrapper must stay click-through: it used to be `pointer-events-auto`,
+    // which meant an invisible full-screen div ate every touch and left the
+    // mobile controls dead. Only the actual menus opt back into events.
     <div className="fixed inset-0 z-50 pointer-events-none">
-      <div className="pointer-events-auto">
-        <AnimatePresence mode="wait">
-          {gameState === GameState.PLAYING && <HUD key="hud" />}
-          {gameState === GameState.MENU && <MainMenu key="menu" />}
-          {gameState === GameState.PAUSED && <PauseMenu key="pause" />}
-          {gameState === GameState.GAME_OVER && <GameOverMenu key="gameover" />}
-          {gameState === GameState.VICTORY && <VictoryMenu key="victory" />}
-        </AnimatePresence>
-      </div>
+      <AnimatePresence mode="wait">
+        {gameState === GameState.PLAYING && <HUD key="hud" />}
+        {gameState === GameState.MENU && <MainMenu key="menu" />}
+        {gameState === GameState.PAUSED && <PauseMenu key="pause" />}
+        {gameState === GameState.GAME_OVER && <GameOverMenu key="gameover" />}
+        {gameState === GameState.VICTORY && <VictoryMenu key="victory" />}
+      </AnimatePresence>
     </div>
   )
 }

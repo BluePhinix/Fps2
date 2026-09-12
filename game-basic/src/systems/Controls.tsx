@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useInputStore, useGameStore, GameState } from '@/engine'
 import { pointerLocked } from '@/entities/gameRefs'
@@ -61,21 +61,35 @@ export function MouseControls() {
 export function GamepadControls() {
   const setGamepadState = useInputStore((state) => state.setGamepadState)
   const setGamepadConnected = useInputStore((state) => state.setGamepadConnected)
+  const connected = useRef(false)
+  const accumulator = useRef(0)
 
   useEffect(() => {
-    const onConnect = () => setGamepadConnected(true)
-    const onDisconnect = () => setGamepadConnected(false)
+    const onConnect = () => {
+      connected.current = true
+      setGamepadConnected(true)
+    }
+    const onDisconnect = () => {
+      connected.current = false
+      setGamepadConnected(false)
+    }
     window.addEventListener('gamepadconnected', onConnect)
     window.addEventListener('gamepaddisconnected', onDisconnect)
+    // A pad may already be plugged in before this mounts.
+    if (navigator.getGamepads?.().some((g) => g)) onConnect()
     return () => {
       window.removeEventListener('gamepadconnected', onConnect)
       window.removeEventListener('gamepaddisconnected', onDisconnect)
     }
   }, [setGamepadConnected])
 
-  useFrame(() => {
-    const gamepads = navigator.getGamepads()
-    const gp = gamepads[0]
+  useFrame((_, delta) => {
+    if (!connected.current) return
+    // 10Hz is plenty for an analogue stick and avoids a store write per frame.
+    accumulator.current += delta
+    if (accumulator.current < 0.1) return
+    accumulator.current = 0
+    const gp = navigator.getGamepads()[0]
     if (gp) {
       setGamepadState([...gp.axes], gp.buttons.map((b) => b.pressed))
     }
@@ -87,10 +101,11 @@ export function GamepadControls() {
 // ECS 系统更新器
 export function SystemsUpdater() {
   const isPaused = useGameStore((state) => state.isPaused)
-  const setTime = useGameStore((state) => state.setTime)
 
-  useFrame((state, delta) => {
-    setTime(delta, state.clock.elapsedTime)
+  // NOTE: this used to call `setTime(delta, elapsed)` every frame. That is a
+  // zustand write at frame rate, which re-runs every store subscriber's
+  // selector ~60x/second for no benefit — the FPS counter now measures itself.
+  useFrame((_state, delta) => {
     if (!isPaused) {
       defaultSystems.update(delta)
     }

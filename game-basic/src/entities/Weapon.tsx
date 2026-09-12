@@ -1,9 +1,10 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useGameStore, GameState } from '@/engine'
+import { useGameStore, GameState, consumeTouchReload } from '@/engine'
 import { useInputStore } from '@/engine'
-import { enemyMeshRegistry, pointerLocked } from './gameRefs'
+import { useQualityProfile } from '@/engine/quality'
+import { enemyMeshRegistry, isAimActive } from './gameRefs'
 import { useEnemyStore } from './EnemyStore'
 import { useGameSound } from '@/audio'
 import { useEffects } from '@/effects'
@@ -19,6 +20,7 @@ const MAX_RANGE = 100
  */
 export function Weapon() {
   const { camera } = useThree()
+  const profile = useQualityProfile()
 
   const groupRef = useRef<THREE.Group>(null) // matches camera transform
   const gunRef = useRef<THREE.Group>(null) // holds gun mesh, applies bob/sway/recoil
@@ -49,7 +51,8 @@ export function Weapon() {
   const shoot = useCallback(() => {
     const gs = useGameStore.getState()
     if (gs.gameState !== GameState.PLAYING) return
-    if (!pointerLocked.current) return
+    // Pointer lock on desktop, always-aiming on touch.
+    if (!isAimActive()) return
     if (gs.combat.isReloading) return
     if (gs.combat.ammo <= 0) return
 
@@ -137,9 +140,14 @@ export function Weapon() {
 
     const now = performance.now() / 1000
 
-    // Auto-fire: check if left mouse held
-    if (useInputStore.getState().mouseButtons.has(0)) {
+    // Auto-fire: left mouse button or the on-screen FIRE button.
+    if (useInputStore.getState().isFiring()) {
       shoot()
+    }
+
+    // Touch reload button.
+    if (consumeTouchReload()) {
+      reload()
     }
 
     // Movement bob
@@ -234,25 +242,30 @@ export function Weapon() {
           <boxGeometry args={[0.045, 0.1, 0.08]} />
           <meshStandardMaterial color="#1a1a3a" emissive="#ff2a6d" emissiveIntensity={0.1} metalness={0.8} roughness={0.3} />
         </mesh>
-        {/* Energy cell glow */}
-        <mesh position={[0, -0.12, 0.05]}>
-          <boxGeometry args={[0.02, 0.06, 0.03]} />
-          <meshBasicMaterial color="#ff2a6d" />
-        </mesh>
         {/* Stock */}
         <mesh position={[0, 0, 0.32]}>
           <boxGeometry args={[0.05, 0.08, 0.18]} />
           <meshStandardMaterial color="#0d0221" metalness={0.8} roughness={0.35} />
         </mesh>
-        {/* Side accent strips */}
-        <mesh position={[0.04, 0, 0.05]}>
-          <boxGeometry args={[0.005, 0.02, 0.35]} />
-          <meshBasicMaterial color="#05d9e8" />
-        </mesh>
-        <mesh position={[-0.04, 0, 0.05]}>
-          <boxGeometry args={[0.005, 0.02, 0.35]} />
-          <meshBasicMaterial color="#ff2a6d" />
-        </mesh>
+        {/* Trim — dropped on the low tier */}
+        {profile.viewmodelDetail && (
+          <>
+            {/* Energy cell glow */}
+            <mesh position={[0, -0.12, 0.05]}>
+              <boxGeometry args={[0.02, 0.06, 0.03]} />
+              <meshBasicMaterial color="#ff2a6d" />
+            </mesh>
+            {/* Side accent strips */}
+            <mesh position={[0.04, 0, 0.05]}>
+              <boxGeometry args={[0.005, 0.02, 0.35]} />
+              <meshBasicMaterial color="#05d9e8" />
+            </mesh>
+            <mesh position={[-0.04, 0, 0.05]}>
+              <boxGeometry args={[0.005, 0.02, 0.35]} />
+              <meshBasicMaterial color="#ff2a6d" />
+            </mesh>
+          </>
+        )}
         {/* Muzzle flash light */}
         <pointLight ref={muzzleLightRef} position={[0, 0.01, -0.5]} color="#ffcc44" intensity={0} distance={6} />
         {/* Muzzle flash mesh */}

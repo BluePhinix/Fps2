@@ -10,6 +10,7 @@ import {
 import { BlendFunction, GlitchMode } from 'postprocessing'
 import * as THREE from 'three'
 import { create } from 'zustand'
+import { useQualityProfile } from '@/engine/quality'
 
 // ============ 后处理状态 Store ============
 
@@ -92,6 +93,11 @@ export function GamePostProcessing({
   enableChromatic: propEnableChromatic,
   enableNoise: propEnableNoise,
 }: GamePostProcessingProps = {}) {
+  // Post processing is the single most expensive thing on a tile-based mobile
+  // GPU (several extra full-screen passes at native resolution), so the whole
+  // chain is skipped below the high tier.
+  const profile = useQualityProfile()
+
   const {
     bloomEnabled,
     bloomIntensity,
@@ -108,6 +114,8 @@ export function GamePostProcessing({
     glitchActive,
   } = usePostProcessingStore()
   
+  if (!profile.postProcessing) return null
+
   const finalBloomIntensity = propBloomIntensity ?? bloomIntensity
   const finalChromaticEnabled = propEnableChromatic ?? chromaticEnabled
   const finalNoiseEnabled = propEnableNoise ?? noiseEnabled
@@ -180,7 +188,9 @@ export function GamePostProcessing({
   }
   
   return (
-    <EffectComposer>
+    // `multisampling` defaults to 8x MSAA on the composer's render target —
+    // brutal for mobile fill rate. 0 keeps a single sample.
+    <EffectComposer multisampling={0} enableNormalPass={false}>
       {effects}
     </EffectComposer>
   )
